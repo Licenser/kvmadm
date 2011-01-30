@@ -20,8 +20,10 @@ function new_vm() {
 	ID=`next_id`
 	cat > "$BASE_DIR/$NAME" <<EOF 
 NAME=$NAME
-DISK=
-ISO=
+DISK0_TYPE=hda
+DISK0_FILE=
+DISK1_TYPE=cdrom
+DISK1_FILE=
 NIC0_VNIC=
 NIC0_MAC=$MAC
 MEM=
@@ -61,6 +63,7 @@ General
 ID: $(vm_val $VM ID)
 Name: $(vm_val $VM NAME)
 Status: $STATUS
+Definition: $BASE_DIR/$1
 
 Hardware
 ========
@@ -72,6 +75,19 @@ IO
 ISO: $(vm_val $VM ISO)
 HDD: $(vm_val $VM DISK)
 EOF
+	DISK_ID=0
+	while [ "$(vm_val $VM "DISK${DISK_ID}_TYPE")" ]; do
+		TYPE=$(vm_val $VM "DISK${DISK_ID}_TYPE")
+		FILE=$(vm_val $VM "DISK${DISK_ID}_FILE")
+		cat <<EOF
+
+Disk $DISK_ID
+============
+Type: $TYPE
+File: $FILE
+EOF
+	DISK_ID=$(expr $DISK_ID + 1)
+	done
 	NIC_ID=0 
 	while [ "$(vm_val $VM "NIC${NIC_ID}_VNIC")" ]; do
 		VNIC=$(vm_val $VM "NIC${NIC_ID}_VNIC")
@@ -127,8 +143,26 @@ function start_vm() {
 		NIC_ID=`expr $NIC_ID + 1`
 	done
 	PARAMS="${PARAMS} -m $(vm_val $VM MEM) -vnc :$(vm_val $VM ID)  -no-hpet"
-	PARAMS="${PARAMS} -chardev socket,id=serial0,path=${RUN_PATH}/kvm.${NAME}.console,server,nowait -serial chardev:serial0 -hdb $VMDISK_ROOT/$(vm_val $VM DISK) $(vm_val $VM OPTS)"
-	qemu-system-x86_64 ${PARAMS} > ${RUN_PATH}/kvm.${NAME}.log &
+	PARAMS="${PARAMS} -chardev socket,id=serial0,path=${RUN_PATH}/kvm.${NAME}.console,server,nowait -serial chardev:serial0 $(vm_val $VM OPTS)"
+  DISK_ID=0
+  while [ "$(vm_val $VM "DISK${DISK_ID}_TYPE")" ]; do
+    TYPE=$(vm_val $VM "DISK${DISK_ID}_TYPE")
+    FILE=$(vm_val $VM "DISK${DISK_ID}_FILE")
+		case $TYPE in
+			hd?)
+				PARAMS="${PARAMS} -${TYPE} ${VMDISK_ROOT}/${FILE}"
+			;;
+			cdrom)
+				PARAMS="${PARAMS} -${TYPE} ${FILE}"
+			;;
+			*)
+			echo "Unknown disk type $TYPE, skipping disk $DISK_ID."
+			;;
+		esac
+  	DISK_ID=$(expr $DISK_ID + 1)
+  done
+
+  echo	qemu-system-x86_64 ${PARAMS} #> ${RUN_PATH}/kvm.${NAME}.log &
 	echo $! > ${RUN_PATH}/kvm.${NAME}.pid
 }
 function next_id() {
@@ -305,6 +339,7 @@ case $1 in
 	cat <<-EOH
   main commands
   kvmadm list            - list all VM's
+  kvmadm show <vm>       - gives a detailed info over the VM
   kvmadm start <vm>      - starts a powered off VM
   kvmadm stop <vm>       - stops a running VM
   kvmadm set <vm>        - sets options for a VM
