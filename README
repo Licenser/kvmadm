@@ -4,22 +4,27 @@ CM files are stored in /etc/vms and just included as scripts to read their value
 Usage
 
   main commands
-  vmadm list       - list all VM's
-  vmadm start <vm> - starts a powered off VM
-  vmadm stop <vm>  - stops a running VM
-  vmadm set <vm>   - sets options for a VM
+  kvmadm list            - list all VM's
+  kvmadm show <vm>       - gives a detailed info over the VM
+  kvmadm start <vm>      - starts a powered off VM
+  kvmadm stop <vm>       - stops a running VM
+  kvmadm set <vm>        - sets options for a VM
+  kvmadm new <vm>        - creates a new VM
+  kvmadm activate <vm>   - activates the VM
+  kvmadm deactivate <vm> - activates the VM
   
   set options
   cpu <v-cores>
   mem <MB>
-  iso <iso-file>
-  disk <disk in vm disks folder>
-  net <network id> <type|vnic|mac|vlan> <value>
+  disk <id> type|file <value>
+  net <network id> <type|vnic|vlan> <value>
+  net <network id> <mac> <rand|value>
+  opts <opt string>
 
   Helpful hints
   =============
   Create a new virtual interface with this command:
   dladm create-vnic -l <interface> <virtual interface>
 
-Create a new disk with this command:
-zfs create -V 10g data/vms/<disk name>
+  Create a new disk with this command:
+  zfs create -V 10g data/vms/<disk name>
