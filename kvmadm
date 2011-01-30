@@ -6,6 +6,9 @@ HDD_TYPE=virtio
 BASE_DIR=/etc/vms
 RUN_PATH=/tmp
 
+function rand_nic() {
+	printf 'DE:AD:%02X:%02X:%02X:%02X\n' $((RANDOM%257)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256))
+}
 
 function new_vm() {
 	NAME=$1
@@ -13,7 +16,7 @@ function new_vm() {
 		echo "VM $NAME already exists"
 		exit 1
 	fi
-	MAC=`printf 'DE:AD:%02X:%02X:%02X:%02X\n' $((RANDOM%257)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256))`
+	MAC=`rand_nic`
 	ID=`next_id`
 	cat > "$BASE_DIR/$NAME" <<EOF 
 NAME=$NAME
@@ -34,8 +37,8 @@ function start() {
 	VM=$1
 	STATUS=`vm_status $VM`
 	. $BASE_DIR/$VM
-	if [ -z "$STATUS" ]; then
-		echo "VM $NAME already running. $STATUS" 
+	if [ "$STATUS" ]; then
+		echo "VM $NAME already running. '$STATUS'" 
 		exit 1
 	fi
 	if [ "$ACTIVE" == "0" ]; then
@@ -122,6 +125,8 @@ function set_opt() {
 				write_opt $VM "DISK" "$3"
 			else
 				echo "Can't find VM DISK $3"
+				echo "Plese crate it with:\nzfs create -V <size e.g. 10g> $VM_POOL/$3"
+				exit 1
 			fi
 		;;
 		iso)
@@ -137,10 +142,22 @@ function set_opt() {
 					write_opt $VM "NIC${3}_TYPE" "$5"
 				;;
 				vnic)
-					write_opt $VM "NIC${3}_VNIC" "$5"
+					if dladm show-vnic | tail -n +2 | grep "^$5 " > /dev/null
+					then
+						write_opt $VM "NIC${3}_VNIC" "$5"
+					else
+						echo "Can't find vnic $5."
+						echo "Create it with:"
+						echo "dladm create-vnic -l <interface> $5"
+						exit 1
+					fi
 				;;
 				mac)
-					write_opt $VM "NIC${3}_MAC" "$5"
+					if [ "$5" == "rand" ]; then
+						write_opt $VM "NIC${3}_MAC" `rand_nic`
+					else	
+						write_opt $VM "NIC${3}_MAC" "$5"
+					fi
 				;;
 				vlan)
 					write_opt $VM "NIC${3}_VLAN" "$5"
@@ -158,6 +175,17 @@ function set_opt() {
 
 case $1 in
   start)
+	if [ "$2" == "all" ]; then
+    CPWD=$PWD
+		cd $BASE_DIR
+		for vm in `ls -1`; do
+			if [ "`vm_val $vm ACTIVE`" != "0" ]; then
+				start $vm
+			fi
+		done
+		cd $CPWD
+		exit 0
+	fi
 	if [ -f $BASE_DIR/$2 ]
 	then
 		start $2
@@ -169,27 +197,26 @@ case $1 in
   list)
     CPWD=$PWD
 		cd $BASE_DIR
-	  printf "%20s %s\n" "VM" "Status"
+	  printf "%-5s %20s %s\n" "ID" "VM" "Status"
 		for vm in `ls -1`;
 		do
 			NAME=`vm_val $vm NAME`
 			PID=`vm_status $NAME`
-			if [ "x$PID" == "x" ]; then
+			if [ -z "$PID" ]; then
 				STATE="ofline"
 			else
-				STATE="online"
+				STATE="online ($PID)"
 			fi
 			ACTIVE=`vm_val $vm ACTIVE`
 			if [  "$ACTIVE" == 0 ]; then
 				STATE="inactive"
 			fi
-			printf "%20s %s\n" $NAME $STATE
+			printf "%-5d %20s %s\n" `vm_val $vm ID` "$NAME" "$STATE"
 	done
-
 	cd $CPWD
 	;;
   stop) 
-		NAME=`vm_name $2`
+		NAME=`vm_val $2 NAME`
 		PID=`vm_status $NAME`
 		if [ "x$PID" == "x" ]; then
 			echo "VM $NAME not running"
@@ -228,7 +255,8 @@ case $1 in
   mem <MB>
   iso <iso-file>
   disk <disk in vm disks folder>
-  net <network id> <type|vnic|mac|vlan> <value>
+  net <network id> <type|vnic|vlan> <value>
+  net <network id> <mac> <rand|value>
 	opts <opt string>
 
   Helpful hints
