@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<!-- Configuration file for qemu server 
+
+    iso-library is a local location for CD iso images, which saves sending
+    them across the network.  See PyQemu.QInstance.SetCdromImage().
+ -->
+<qserver iso-library="/usr/share/iso">
+
+  <!-- Configuration for machine
+
+       name - A name by which to refer to the virtual machine.
+              This has to be used as a filename, and in a url.
+              The name may contain only alphanumerics or dash (no spaces).
+       hda - the location of the read-only base disk image, can be shared
+             between machine instances, since COW files will be created.
+             Don't use spaces in this path..
+       cdrom - Location of the file/device used for the the cdrom drive.
+               Can be blank for none.
+       memory - the amount of memory to assign to this machine
+       tmp - the location for temp files which must be unique
+             to this machine.  PID files will be stored here, and also
+             the COW image.  It's also used as a temporary area for 
+             screen shots.
+       keyboard - For the VNC server this needs to be set.
+       boot - Boot device: a=floppy, c=hard disk, d=cdrom
+      -->
+  
+  <machine  
+    name="win2k"
+    hda="/var/qemu/hda.img"
+    cdrom=""
+    memory="128"
+    tmp="/var/qemu/vm1"
+    keyboard="en-gb"
+    boot="c"
+    >
+
+    <!--
+       <description> - Any XHTML is valid within these tags.  It will be 
+                       displayed in a GUI and is supposed to indicate what
+                       the machine is used for, put here any info which 
+                       can't be conveyed by the name.
+      -->
+    
+    <description>
+    Windows 2000 test machine.
+    </description>
+  </machine>
+
+  <!-- Configuration file for machine 2 -->
+  <machine  
+    name="win2k-2"
+    hda="/var/qemu/hda.img"
+    cdrom=""
+    memory="128"
+    tmp="/var/qemu/vm2"
+    keyboard="en-gb"
+    boot="c"
+    >
+    
+    <description>
+    Windows 2000 test machine #2
+    </description>
+  </machine>
+
+</qserver>
