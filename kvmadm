@@ -14,6 +14,7 @@ function new_vm() {
 		exit 1
 	fi
 	MAC=`printf 'DE:AD:%02X:%02X:%02X:%02X\n' $((RANDOM%257)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256))`
+	ID=`next_id`
 	cat > "$BASE_DIR/$NAME" <<EOF 
 NAME=$NAME
 DISK=
@@ -23,7 +24,7 @@ NIC0_MAC=$MAC
 MEM=
 NIC0_TYPE=$NIC_TYPE
 ACTIVE=0
-ID=1
+ID=$ID
 CPUS=1
 OPTS=
 EOF
@@ -64,6 +65,9 @@ function start() {
 	PARAMS="${PARAMS} -chardev socket,id=serial0,path=${RUN_PATH}/kvm.$NAME.console,server,nowait -serial chardev:serial0 -hdb $VMDISK_ROOT/$DISK ${OPTS}"
 	qemu-system-x86_64 ${PARAMS} > ${RUN_PATH}/kvm.${NAME}.log &
 	echo $! > ${RUN_PATH}/kvm.${NAME}.pid
+}
+function next_id() {
+	expr `cat $BASE_DIR/* | grep "^ID=" | sed "s/^ID=//" | sort -n | tail -1` + 1
 }
 
 function write_opt() {
