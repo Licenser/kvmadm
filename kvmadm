@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+VM_POOL=data/vms
+VMDISK_ROOT=/dev/zvol/rdsk/$VM_POOL
+NIC_TYPE=virtio
+HDD_TYPE=virtio
+BASE_DIR=/etc/vms
+RUN_PATH=/tmp
+
+
+function new() {
+	NAME=$1
+	if [ -f "$BASE_DIR/$NAME" ]; then
+		echo "VM $NAME already exists"
+		exit 1
+	fi
+	MAC=`printf 'DE:AD:%02X:%02X:%02X:%02X\n' $((RANDOM%257)) $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256))`
+	cat > "$BASE_DIR/$NAME" <<EOF 
+NAME=$NAME
+DISK=
+ISO=
+NIC0_VNIC=
+NIC0_MAC=$MAC
+MEM=
+NIC0_TYPE=e1000
+ACTIVE=0
+ID=1
+CPUS=1
+EOF
+}
+function start() {
+	VM=$1
+	STATUS=`vm_status $VM`
+	. $BASE_DIR/$VM
+	if [ "x$STATUS" != "x" ]; then
+		echo "VM $NAME already running. $STATUS" 
+		exit 1
+	fi
+	if [ "$ACTIVE" == "0" ]; then
+		echo "VM is deactivated."
+		exit 0
+  fi
+	echo "Starting VM $NAME"
+	PARAMS="-enable-kvm -nographic -no-hpet -smp $CPUS"
+	PARAMS="${PARAMS} -monitor unix:${RUN_PATH}/kvm.${NAME}.mon,server,nowait"
+	NIC_ID=0 
+	while [ "$(eval echo "\${NIC${NIC_ID}_VNIC}")x" != "x" ]; do
+		VNIC=$(eval echo "\${NIC${NIC_ID}_VNIC}")
+		MAC=$(eval echo "\${NIC${NIC_ID}_MAC}")
+		TYPE=$(eval echo "\${NIC${NIC_ID}_TYPE}")
+		if [ "${TYPE}x" == "x" ]; then
+			TYPE="virtio"
+		fi
+		VLAN=$(eval echo "\${NIC${NIC_ID}_VLAN}")
+		if [ "${VLAN}x" == "x" ]; then
+			VLAN="0"
+		fi
+		PARAMS="${PARAMS} -net nic,vlan=${VLAN},name=net${NIC_ID},model=${TYPE},macaddr=${MAC}"
+    		PARAMS="${PARAMS} -net vnic,vlan=${VLAN},name=net${NIC_ID},ifname=${VNIC},macaddr=${MAC}"
+		NIC_ID=`expr $NIC_ID + 1`
+	done
+	PARAMS="${PARAMS} -m ${MEM} -vnc :$ID  -no-hpet"
+	PARAMS="${PARAMS} -chardev socket,id=serial0,path=${RUN_PATH}/kvm.$NAME.console,server,nowait -serial chardev:serial0 -hdb $VMDISK_ROOT/$DISK"
+	qemu-system-x86_64 ${PARAMS} > ${RUN_PATH}/kvm.${NAME}.log &
+	echo $! > ${RUN_PATH}/kvm.${NAME}.pid
+}
+
+function replace_opt() {
+	sed -i "s/${2}=.*/${2}=${3}/" ${BASE_DIR}/${1}
+}
+
+function vm_status() {
+	PID=`cat ${RUN_PATH}/kvm.${1}.pid 2> /dev/null`
+	LIST=`ps -e | grep "^[ ]*$PID "`
+	if [ "x$LIST" != "x" ]; then
+		echo $PID
+	fi
+}
+
+function vm_val() {
+	if [ -f "${BASE_DIR}/${1}" ]; then
+	  echo `grep "$2=" "${BASE_DIR}/${1}" | sed "s/$2=//"`
+	fi
+}
+
+function set_opt() {
+	VM=$1
+	OPT=$2
+	echo "$1 $2 $3 $4"
+	case $OPT in
+		cpu)
+			replace_opt $VM "CPUS" "$3"
+		;;
+		mem)
+			replace_opt $VM "MEM" "$3"
+		;;
+		disk)
+			if [ -f $VMDISK_ROOT/$3 ]; then
+				replace_opt $VM "DISK" "$3"
+			else
+				echo "Can't find VM DISK $3"
+			fi
+		;;
+		iso)
+			if [ -f $3]; then
+				replace_opt $VM "ISO" "$3"
+			else
+				echo "Can't find ISO file $3."
+			fi
+		;;
+		net)
+			case $4 in
+				type)
+					replace_opt $VM "NIC${3}_TYPE" "$5"
+				;;
+				vnic)
+					replace_opt $VM "NIC${3}_VNIC" "$5"
+				;;
+				mac)
+					replace_opt $VM "NIC${3}_MAC" "$5"
+				;;
+				vlan)
+					replace_opt $VM "NIC${3}_VLAN" "$5"
+				;;
+				*)
+					echo "Invalid network category, valid options are: type, vnic, mac, vlan."
+				;;
+			esac
+			;;
+		*)
+			echo "Valid options are: cpu, mem, disk, iso."
+		;;
+	esac	
+}
+
+case $1 in
+  start)
+	if [ -f $BASE_DIR/$2 ]
+	then
+		start $2
+	else
+		echo "Can't find VM $MV_CFG_PATH"
+		exit 1
+	fi
+	;;
+  list)
+    CPWD=$PWD
+		cd $BASE_DIR
+	  printf "%20s %s\n" "VM" "Status"
+		for vm in `ls -1`;
+		do
+			NAME=`vm_val $vm NAME`
+			PID=`vm_status $NAME`
+			if [ "x$PID" == "x" ]; then
+				STATE="ofline"
+			else
+				STATE="online"
+			fi
+			ACTIVE=`vm_val $vm ACTIVE`
+			if [  "$ACTIVE" == 0 ]; then
+				STATE="inactive"
+			fi
+			printf "%20s %s\n" $NAME $STATE
+	done
+
+	cd $CPWD
+	;;
+  stop) 
+		NAME=`vm_name $2`
+		PID=`vm_status $NAME`
+		if [ "x$PID" == "x" ]; then
+			echo "VM $NAME not running"
+		else
+			echo "VM $NAME stopping..."
+			kill $PID
+		fi
+	;;
+  set)
+	if [ -f $BASE_DIR/$2 ]
+	then
+		set_opt $2 $3 $4 $5 $6
+	else
+		echo "Can't find VM $MV_CFG_PATH"
+		exit 1
+	fi
+	;;
+  *)
+	cat <<-EOH
+  main commands
+  vmadm list       - list all VM's
+  vmadm start <vm> - starts a powered off VM
+  vmadm stop <vm>  - stops a running VM
+  vmadm set <vm>   - sets options for a VM
+  
+  set options
+  cpu <v-cores>
+  mem <MB>
+  iso <iso-file>
+  disk <disk in vm disks folder>
+  net <network id> <type|vnic|mac|vlan> <value>
+
+  Helpful hints
+  =============
+  Create a new virtual interface with this command:
+  dladm create-vnic -l <interface> <virtual interface>
+
+	Create a new disk with this command:
+	zfs create -V 10g $VM_POOL/<disk name>
+EOH
+	;;
+esac
+exit 0

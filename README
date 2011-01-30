@@ -1,0 +1,20 @@
+  main commands
+  vmadm list       - list all VM's
+  vmadm start <vm> - starts a powered off VM
+  vmadm stop <vm>  - stops a running VM
+  vmadm set <vm>   - sets options for a VM
+  
+  set options
+  cpu <v-cores>
+  mem <MB>
+  iso <iso-file>
+  disk <disk in vm disks folder>
+  net <network id> <type|vnic|mac|vlan> <value>
+
+  Helpful hints
+  =============
+  Create a new virtual interface with this command:
+  dladm create-vnic -l <interface> <virtual interface>
+
+Create a new disk with this command:
+zfs create -V 10g data/vms/<disk name>
