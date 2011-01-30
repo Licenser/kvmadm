@@ -33,39 +33,101 @@ OPTS=
 EOF
 }
 
-function start() {
-	VM=$1
-	STATUS=`vm_status $VM`
-	. $BASE_DIR/$VM
-	if [ "$STATUS" ]; then
-		echo "VM $NAME already running. '$STATUS'" 
+function check_vm() {
+	if [ ! -f "$BASE_DIR/$1" ]; then
+		echo "VM $1 does not exist."
 		exit 1
 	fi
-	if [ "$ACTIVE" == "0" ]; then
-		echo "VM is deactivated."
-		exit 0
+}
+
+function show_vm() {
+	VM=$1
+	if [ -z "$(vm_status $VM)" ]; then
+		STATUS="offline"
+	else
+		STATUS="online"
+	fi
+	if [ "$(vm_val $VM ACTIVE)" == 0 ]; then
+		STATUS="inactive"
   fi
-	echo "Starting VM $NAME"
-	PARAMS="-enable-kvm -nographic -no-hpet -smp $CPUS"
-	PARAMS="${PARAMS} -monitor unix:${RUN_PATH}/kvm.${NAME}.mon,server,nowait"
+
+
+	cat <<EOF
+VM Status - $(vm_val $VM NAME) 
+=================
+
+General
+=======
+ID: $(vm_val $VM ID)
+Name: $(vm_val $VM NAME)
+Status: $STATUS
+
+Hardware
+========
+CPUs: $(vm_val $VM CPUS)
+Memory: $(vm_val $VM MEM MB)
+
+IO
+==
+ISO: $(vm_val $VM ISO)
+HDD: $(vm_val $VM DISK)
+EOF
 	NIC_ID=0 
-	while [ "$(eval echo "\${NIC${NIC_ID}_VNIC}")" ]; do
-		VNIC=$(eval echo "\${NIC${NIC_ID}_VNIC}")
-		MAC=$(eval echo "\${NIC${NIC_ID}_MAC}")
-		TYPE=$(eval echo "\${NIC${NIC_ID}_TYPE}")
+	while [ "$(vm_val $VM "NIC${NIC_ID}_VNIC")" ]; do
+		VNIC=$(vm_val $VM "NIC${NIC_ID}_VNIC")
+		MAC=$(vm_val $VM "NIC${NIC_ID}_MAC")
+		TYPE=$(vm_val $VM "NIC${NIC_ID}_TYPE")
 		if [ -z "${TYPE}" ]; then
 			TYPE="virtio"
 		fi
-		VLAN=$(eval echo "\${NIC${NIC_ID}_VLAN}")
+		VLAN=$(vm_val $VM "NIC${NIC_ID}_VLAN")
+		if [ -z "${VLAN}" ]; then
+			VLAN="0"
+		fi
+		cat <<EOF
+
+Network Adapter $NIC_ID
+=======================
+Type: $TYPE
+VNIC: $VNIC
+MAC:  $MAC
+VLAN: $VLAN
+EOF
+		NIC_ID=`expr $NIC_ID + 1`
+	done
+}
+function start_vm() {
+	VM=$1
+	NAME=$(vm_val $VM NAME)
+	if vm_status $VM; then
+		echo "VM $NAME already running." 
+		exit 1
+	fi
+	if [ "$(vm_val $VM ACTIVE)" == "0" ]; then
+		echo "VM is deactivated."
+		exit 1
+  fi
+	echo "Starting VM $NAME"
+	PARAMS="-enable-kvm -nographic -no-hpet -smp $(vm_val $VM CPUS)"
+	PARAMS="${PARAMS} -monitor unix:${RUN_PATH}/kvm.${NAME}.mon,server,nowait"
+	NIC_ID=0 
+	while [ "$(vm_val $VM "NIC${NIC_ID}_VNIC")" ]; do
+		VNIC=$(vm_val $VM "NIC${NIC_ID}_VNIC")
+		MAC=$(vm_val $VM "NIC${NIC_ID}_MAC")
+		TYPE=$(vm_val $VM "NIC${NIC_ID}_TYPE")
+		if [ -z "${TYPE}" ]; then
+			TYPE="virtio"
+		fi
+		VLAN=$(vm_val $VM "NIC${NIC_ID}_VLAN")
 		if [ -z "${VLAN}" ]; then
 			VLAN="0"
 		fi
 		PARAMS="${PARAMS} -net nic,vlan=${VLAN},name=net${NIC_ID},model=${TYPE},macaddr=${MAC}"
-    		PARAMS="${PARAMS} -net vnic,vlan=${VLAN},name=net${NIC_ID},ifname=${VNIC},macaddr=${MAC}"
+  	PARAMS="${PARAMS} -net vnic,vlan=${VLAN},name=net${NIC_ID},ifname=${VNIC},macaddr=${MAC}"
 		NIC_ID=`expr $NIC_ID + 1`
 	done
-	PARAMS="${PARAMS} -m ${MEM} -vnc :$ID  -no-hpet"
-	PARAMS="${PARAMS} -chardev socket,id=serial0,path=${RUN_PATH}/kvm.$NAME.console,server,nowait -serial chardev:serial0 -hdb $VMDISK_ROOT/$DISK ${OPTS}"
+	PARAMS="${PARAMS} -m $(vm_val $VM MEM) -vnc :$(vm_val $VM ID)  -no-hpet"
+	PARAMS="${PARAMS} -chardev socket,id=serial0,path=${RUN_PATH}/kvm.${NAME}.console,server,nowait -serial chardev:serial0 -hdb $VMDISK_ROOT/$(vm_val $VM DISK) $(vm_val $VM OPTS)"
 	qemu-system-x86_64 ${PARAMS} > ${RUN_PATH}/kvm.${NAME}.log &
 	echo $! > ${RUN_PATH}/kvm.${NAME}.pid
 }
@@ -87,10 +149,7 @@ function write_opt() {
 
 function vm_status() {
 	PID=`cat ${RUN_PATH}/kvm.${1}.pid 2> /dev/null`
-	LIST=`ps -e | grep "^[ ]*$PID "`
-	if [ "$LIST"  ]; then
-		echo $PID
-	fi
+	ps -eo pid | sed 's/ //g' | grep "^$PID$"
 }
 
 function vm_val() {
@@ -180,19 +239,14 @@ case $1 in
 		cd $BASE_DIR
 		for vm in `ls -1`; do
 			if [ "`vm_val $vm ACTIVE`" != "0" ]; then
-				start $vm
+				start_vm $vm
 			fi
 		done
 		cd $CPWD
 		exit 0
 	fi
-	if [ -f $BASE_DIR/$2 ]
-	then
-		start $2
-	else
-		echo "Can't find VM $MV_CFG_PATH"
-		exit 1
-	fi
+	check_vm $2
+	start_vm $2
 	;;
   list)
     CPWD=$PWD
@@ -216,28 +270,36 @@ case $1 in
 	cd $CPWD
 	;;
   stop) 
+		check_vm $2
 		NAME=`vm_val $2 NAME`
 		PID=`vm_status $NAME`
-		if [ "x$PID" == "x" ]; then
+		if [ -z "$PID" ]; then
 			echo "VM $NAME not running"
 		else
-			echo "VM $NAME stopping..."
+			echo "VM $NAME stopping... ($PID)"
 			kill $PID
 		fi
 	;;
   set)
+		cehck_vm $2
 		set_opt "$2" "$3" "$4" "$5" "$6"
 	;;
 	new)
 	  new_vm $2	
 	;;
 	activate)
+		cehck_vm $2
 		set_opt $2 "active" "1"
 		echo "VM $2 activated."
 	;;
 	deactivate)
+		cehck_vm $2
 		set_opt $2 "active" "0"
 		echo "VM $2 deactivated."
+	;;
+	show)
+		check_vm $2
+		show_vm $2	
 	;;
   *)
 	cat <<-EOH
